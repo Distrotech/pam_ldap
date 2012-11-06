@@ -264,7 +264,7 @@ static int _service_ok (pam_handle_t * handle, pam_ldap_session_t * session);
 static char *_get_md5_salt (char saltbuf[16]);
 static char *_get_salt (char salt[16]);
 static int _escape_string (const char *str, char *buf, size_t buflen);
-static int _get_user_info (pam_ldap_session_t * session, const char *user);
+static int _get_user_info (pam_ldap_session_t * session, const char *user, pam_handle_t *pamh);
 static int _pam_ldap_get_session (pam_handle_t * pamh, const char *username,
 				  const char *configFile,
 				  pam_ldap_session_t ** psession);
@@ -2681,11 +2681,12 @@ static char *_pam_ldap_attrs[] = {
   "shadowMin",
   "shadowWarning",
   "uidNumber",
+  "uid",
   NULL 
 };
 
 static int
-_get_user_info (pam_ldap_session_t * session, const char *user)
+_get_user_info (pam_ldap_session_t * session, const char *user, pam_handle_t *pamh)
 {
   char filter[LDAP_FILT_MAXSIZ], escapedUser[LDAP_FILT_MAXSIZ];
   int rc;
@@ -2721,24 +2722,24 @@ _get_user_info (pam_ldap_session_t * session, const char *user)
 nxt:
   if (session->conf->filter != NULL && ssd->filter != NULL)
     {
-      snprintf (filter, sizeof filter, "(&(%s)(%s)(%s=%s))",
+      snprintf (filter, sizeof filter, "(&(%s)(%s)(|(%s=%s)(mailLocalAddress=%s)))",
 		ssd->filter, session->conf->filter, session->conf->userattr,
-		escapedUser);
+		escapedUser,escapedUser);
     }
   else if (ssd->filter != NULL)
     {
-      snprintf (filter, sizeof filter, "(&(%s)(%s=%s))",
-		ssd->filter, session->conf->userattr, escapedUser);
+      snprintf (filter, sizeof filter, "(&(%s)(|(%s=%s)(mailLocalAddress=%s)))",
+		ssd->filter, session->conf->userattr, escapedUser, escapedUser);
     }
   else if (session->conf->filter != NULL)
     {
-      snprintf (filter, sizeof filter, "(&(%s)(%s=%s))",
-		session->conf->filter, session->conf->userattr, escapedUser);
+      snprintf (filter, sizeof filter, "(&(%s)(|(%s=%s)(mailLocalAddress=%s)))",
+		session->conf->filter, session->conf->userattr, escapedUser, escapedUser);
     }
   else
     {
-      snprintf (filter, sizeof filter, "(%s=%s)",
-		session->conf->userattr, escapedUser);
+      snprintf (filter, sizeof filter, "(|(%s=%s)(mailLocalAddress=%s))",
+		session->conf->userattr, escapedUser, escapedUser);
     }
 
   rc = ldap_search_s (session->ld, ssd->base, ssd->scope,
@@ -2781,6 +2782,8 @@ nxt:
   if (rc != PAM_SUCCESS)
     {
       session->info->username = strdup (user);
+    } else {
+      pam_set_item (pamh, PAM_USER, &session->info->username);
     }
 
   if (session->info->username == NULL)
@@ -3039,7 +3042,7 @@ _do_authentication (pam_handle_t *pamh,
 
   if (session->info == NULL)
     {
-      rc = _get_user_info (session, user);
+      rc = _get_user_info (session, user, pamh);
       if (rc != PAM_SUCCESS)
 	return rc;
     }
@@ -3087,7 +3090,7 @@ _update_authtok (pam_handle_t *pamh,
 
   if (session->info == NULL)
     {
-      rc = _get_user_info (session, user);
+      rc = _get_user_info (session, user, pamh);
       if (rc != PAM_SUCCESS)
 	{
 	  return rc;
@@ -3616,7 +3619,7 @@ pam_sm_chauthtok (pam_handle_t * pamh, int flags, int argc, const char **argv)
   /* do we prohibit changes */
   if (session->conf->password_prohibit_message)
     {
-      rc = _get_user_info (session, username);
+      rc = _get_user_info (session, username, pamh);
       STATUS_MAP_IGNORE_POLICY (rc, ignore_flags);
       /* skip non-ldap users */
       if (rc != PAM_SUCCESS)
@@ -3630,7 +3633,7 @@ pam_sm_chauthtok (pam_handle_t * pamh, int flags, int argc, const char **argv)
   if (flags & PAM_PRELIM_CHECK)
     {
       /* see whether the user exists */
-      rc = _get_user_info (session, username);
+      rc = _get_user_info (session, username, pamh);
       STATUS_MAP_IGNORE_POLICY (rc, ignore_flags);
       if (rc != PAM_SUCCESS)
 	return rc;
@@ -3987,7 +3990,7 @@ pam_sm_acct_mgmt (pam_handle_t * pamh, int flags, int argc, const char **argv)
 
   if (session->info == NULL)
     {
-      rc = _get_user_info (session, username);
+      rc = _get_user_info (session, username, pamh);
       if (rc != PAM_SUCCESS)
 	{
 	  STATUS_MAP_IGNORE_POLICY (rc, ignore_flags);
