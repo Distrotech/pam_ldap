@@ -2782,7 +2782,7 @@ nxt:
   if (rc != PAM_SUCCESS)
     {
       session->info->username = strdup (user);
-    } else {
+    } else if (pamh && session->info->username) {
       pam_set_item (pamh, PAM_USER, &session->info->username);
     }
 
@@ -3633,7 +3633,7 @@ pam_sm_chauthtok (pam_handle_t * pamh, int flags, int argc, const char **argv)
   if (flags & PAM_PRELIM_CHECK)
     {
       /* see whether the user exists */
-      rc = _get_user_info (session, username, pamh);
+      rc = _get_user_info (session, username, NULL);
       STATUS_MAP_IGNORE_POLICY (rc, ignore_flags);
       if (rc != PAM_SUCCESS)
 	return rc;
